@@ -566,8 +566,11 @@ def get_financial_sheet_service():
 
     scopes = ["https://www.googleapis.com/auth/spreadsheets"]
     if "gcp_service_account" in st.secrets:
+        service_account_info = dict(st.secrets["gcp_service_account"])
+        if "private_key" in service_account_info:
+            service_account_info["private_key"] = service_account_info["private_key"].replace("\\n", "\n")
         credentials = service_account.Credentials.from_service_account_info(
-            dict(st.secrets["gcp_service_account"]),
+            service_account_info,
             scopes=scopes,
         )
     else:
