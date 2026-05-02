@@ -1,0 +1,76 @@
+{
+  "target_column": "returns_2025_ihs",
+  "raw_target_column": "returns_2025",
+  "ihs_columns": [
+    "returns_2025",
+    "momentum_2024",
+    "roic",
+    "rev_growth_2025",
+    "ebit_growth_2025",
+    "debt_to_assets",
+    "ev_to_ebitda",
+    "valuation_gap",
+    "google_trends",
+    "earnings_surprise",
+    "price_to_book",
+    "price_to_earnings",
+    "stock_volatility",
+    "3_mth_momentum"
+  ],
+  "raw_feature_columns": [],
+  "transformed_feature_columns": [
+    "momentum_2024_ihs",
+    "roic_ihs",
+    "rev_growth_2025_ihs",
+    "ebit_growth_2025_ihs",
+    "debt_to_assets_ihs",
+    "ev_to_ebitda_ihs",
+    "valuation_gap_ihs",
+    "google_trends_ihs",
+    "earnings_surprise_ihs",
+    "price_to_book_ihs",
+    "price_to_earnings_ihs",
+    "stock_volatility_ihs",
+    "3_mth_momentum_ihs"
+  ],
+  "interactions": {
+    "int_rev_growth_2025_ihs_x_price_to_book_ihs": [
+      "rev_growth_2025_ihs",
+      "price_to_book_ihs"
+    ],
+    "int_ev_to_ebitda_ihs_x_price_to_book_ihs": [
+      "ev_to_ebitda_ihs",
+      "price_to_book_ihs"
+    ],
+    "int_rev_growth_2025_ihs_x_ev_to_ebitda_ihs": [
+      "rev_growth_2025_ihs",
+      "ev_to_ebitda_ihs"
+    ],
+    "int_debt_to_assets_ihs_x_price_to_book_ihs": [
+      "debt_to_assets_ihs",
+      "price_to_book_ihs"
+    ],
+    "int_momentum_2024_ihs_x_valuation_gap_ihs": [
+      "momentum_2024_ihs",
+      "valuation_gap_ihs"
+    ],
+    "int_price_to_earnings_ihs_x_rev_growth_2025_ihs": [
+      "price_to_earnings_ihs",
+      "rev_growth_2025_ihs"
+    ]
+  },
+  "pdp_2d_pairs": [
+    [
+      "rev_growth_2025_ihs",
+      "price_to_book_ihs"
+    ],
+    [
+      "ev_to_ebitda_ihs",
+      "price_to_book_ihs"
+    ],
+    [
+      "momentum_2024_ihs",
+      "valuation_gap_ihs"
+    ]
+  ]
+}

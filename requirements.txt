@@ -1,0 +1,17 @@
+altair
+fredapi
+google-api-python-client
+google-auth
+matplotlib
+numpy
+openpyxl
+pandas
+pytrends
+python-dateutil
+python-dotenv
+scikit-learn
+scipy
+statsmodels
+streamlit
+xgboost
+yfinance

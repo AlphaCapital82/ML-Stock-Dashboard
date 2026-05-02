@@ -1,0 +1,159 @@
+LOOK-AHEAD BIAS MODEL PLAN
+
+Goal
+Build a model that learns from information available before the return period,
+then apply that learned relationship to the next year.
+
+Core idea
+Train:
+    2024 fundamentals and 2024 market data -> returns_2025
+
+Score:
+    2025 fundamentals and 2025/current market data -> predicted_returns_2026
+
+This avoids using actual 2025 fundamentals to explain 2025 returns.
+
+
+1. Define the training dataset
+
+The training dataset should contain one row per ticker.
+
+Target:
+    returns_2025
+
+Features:
+    roic_2024
+    rev_growth_2024
+    ebit_growth_2024
+    debt_to_assets_2024
+    ev_to_ebitda_asof_2025_start
+    price_to_book_asof_2025_start
+    price_to_earnings_asof_2025_start
+    valuation_gap_asof_2025_start
+    earnings_surprise_known_before_2025
+    momentum_2024
+    stock_volatility_2024
+    google_trends_2024
+
+Important rule:
+    Every feature must be known before, or at the start of, the 2025 return
+    period. If a value was only known later in 2025, it should not be used.
+
+
+2. Define the scoring dataset
+
+The scoring dataset should use the same feature definitions, but shifted one
+year forward.
+
+Prediction output:
+    predicted_returns_2026
+
+Features:
+    roic_2025
+    rev_growth_2025
+    ebit_growth_2025
+    debt_to_assets_2025
+    ev_to_ebitda_asof_2026_start_or_now
+    price_to_book_asof_2026_start_or_now
+    price_to_earnings_asof_2026_start_or_now
+    valuation_gap_asof_2026_start_or_now
+    earnings_surprise_known_before_prediction_date
+    momentum_2025
+    stock_volatility_2025
+    google_trends_2025
+
+The model is trained on the 2024 -> 2025 relationship, then applied to the
+2025 feature values to rank stocks for 2026.
+
+
+3. Do not mix the two datasets
+
+Keep separate files:
+    historical_training_2024_to_2025.xlsx
+    current_scoring_2025_to_2026.xlsx
+
+Do not train against returns_2025 using current 2025/2026 values fetched today.
+That would create look-ahead bias.
+
+
+4. Rename columns or create a mapping
+
+The ML scripts currently expect generic names like:
+    roic
+    rev_growth_2025
+    ebit_growth_2025
+    returns_2025
+
+For the clean version, either rename columns before running the model, or create
+a preprocessing step that maps year-specific columns into generic model columns.
+
+Training mapping example:
+    roic_2024              -> roic
+    rev_growth_2024        -> rev_growth
+    ebit_growth_2024       -> ebit_growth
+    debt_to_assets_2024    -> debt_to_assets
+    momentum_2024          -> momentum
+    stock_volatility_2024  -> stock_volatility
+    returns_2025           -> target_return
+
+Scoring mapping example:
+    roic_2025              -> roic
+    rev_growth_2025        -> rev_growth
+    ebit_growth_2025       -> ebit_growth
+    debt_to_assets_2025    -> debt_to_assets
+    momentum_2025          -> momentum
+    stock_volatility_2025  -> stock_volatility
+
+This lets the same model code train and score using consistent feature names.
+
+
+5. Practical implementation steps
+
+Step 1:
+    Create or export a workbook with 2024 fundamentals and market data.
+
+Step 2:
+    Add returns_2025 as the target column.
+
+Step 3:
+    Run cleaning, diagnostics, feature transformation, and model training on
+    that historical training file.
+
+Step 4:
+    Create a separate workbook with 2025 fundamentals and current market data.
+
+Step 5:
+    Apply the trained model to the 2025/current feature file.
+
+Step 6:
+    Save the output as predicted_returns_2026 or ranked_predictions_2026.
+
+
+6. What to watch carefully
+
+High look-ahead risk:
+    - actual 2025 fundamentals used to predict returns_2025
+    - valuation ratios fetched today used to train on old returns
+    - DCF / valuation_gap if it uses current estimates
+    - google_trends if the trend window includes dates after the prediction date
+    - earnings_surprise if the announcement happened after the prediction date
+
+Lower look-ahead risk:
+    - momentum_2024 used for returns_2025
+    - stock_volatility_2024 used for returns_2025
+    - 2024 fundamentals used for returns_2025, if they were available before the
+      return period or if the return period starts after annual reporting
+
+
+7. Recommended first clean version
+
+Use:
+    X = 2024 fundamentals + 2024 market data
+    y = returns_2025
+
+Then score:
+    X = 2025 fundamentals + 2025/current market data
+    output = predicted_returns_2026
+
+This is simple, understandable, and avoids the largest look-ahead problem.
+

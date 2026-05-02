@@ -1,0 +1,26 @@
+.env
+.venv/
+.idea/
+__pycache__/
+*.pyc
+
+# Private credentials and local ingestion state
+0_ingestion/*.json
+0_ingestion/stock_statement_cache/
+0_ingestion/*_last_run.json
+0_ingestion/failed_tickers.json
+
+# Local datasets, generated workbooks, model outputs, logs, and caches
+0_needs_processing/
+1_cleaned/
+2_diagnosis/
+3_ready_for_analysis/
+4_ready_for_analysis/
+5_output/
+backup_tickerlist/
+______old_data_____/
+*.xlsx
+*.xlsm
+
+# Local generated dumps
+tickerlist_with_3m_price_change.xlsx
