@@ -3,6 +3,7 @@
 .idea/
 __pycache__/
 *.pyc
+*.bak*
 
 # Private credentials and local ingestion state
 0_ingestion/*.json

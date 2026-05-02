@@ -563,12 +563,23 @@ def get_financial_sheet_service():
         from googleapiclient.discovery import build
     except ImportError as exc:
         raise RuntimeError("Google Sheets packages are not installed in this environment.") from exc
-    if not GOOGLE_CREDENTIALS_PATH.exists():
-        raise RuntimeError(f"Missing Google credentials file: {GOOGLE_CREDENTIALS_PATH}")
-    credentials = service_account.Credentials.from_service_account_file(
-        GOOGLE_CREDENTIALS_PATH,
-        scopes=["https://www.googleapis.com/auth/spreadsheets"],
-    )
+
+    scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+    if "gcp_service_account" in st.secrets:
+        credentials = service_account.Credentials.from_service_account_info(
+            dict(st.secrets["gcp_service_account"]),
+            scopes=scopes,
+        )
+    else:
+        if not GOOGLE_CREDENTIALS_PATH.exists():
+            raise RuntimeError(
+                "Google Sheets credentials are not configured. "
+                "Add [gcp_service_account] to Streamlit secrets, or provide the local credentials file."
+            )
+        credentials = service_account.Credentials.from_service_account_file(
+            GOOGLE_CREDENTIALS_PATH,
+            scopes=scopes,
+        )
     return build("sheets", "v4", credentials=credentials)
 
 
