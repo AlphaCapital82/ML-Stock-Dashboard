@@ -1,0 +1,20 @@
+LINEAR BASELINE SUMMARY
+Generated UTC: 2026-05-02T13:33:44+00:00
+Input file: 4_ready_for_analysis\tickerlist.xlsx
+Rows scored: 1812
+Rows with target used for modeling: 1812
+Target column: returns_2025_ihs
+Raw target column: returns_2025
+Feature count: 19
+Best baseline model: elastic_net
+
+Metrics:
+            model  train_rmse  train_r2  val_rmse   val_r2  test_rmse  test_r2
+      elastic_net    0.356130  0.135127  0.331909 0.102338   0.372299 0.108225
+linear_regression    0.355685  0.137291  0.334571 0.087882   0.373016 0.104786
+            ridge    0.357057  0.130619  0.336106 0.079492   0.373268 0.103576
+
+Output files:
+- 5_output\linear_predictions.csv
+- 5_output\linear_ranked_predictions.csv
+- 5_output\linear_coefficients.csv
