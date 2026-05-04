@@ -296,12 +296,24 @@ def build_portfolio_suggestion(
     *,
     size: int,
     sort_mode: str,
+    filters: dict[str, tuple[float | None, float | None]] | None = None,
 ) -> pd.DataFrame:
     if stock_universe.empty or "ticker" not in stock_universe.columns:
         return pd.DataFrame()
 
     candidates = stock_universe.copy()
     candidates["data_completeness"] = data_completeness_score(candidates)
+
+    for col, bounds in (filters or {}).items():
+        if col not in candidates.columns:
+            continue
+        min_value, max_value = bounds
+        numeric = pd.to_numeric(candidates[col], errors="coerce")
+        if min_value is not None:
+            candidates = candidates[numeric >= min_value]
+            numeric = pd.to_numeric(candidates[col], errors="coerce")
+        if max_value is not None:
+            candidates = candidates[numeric <= max_value]
 
     if sort_mode == "Linear rank" and "linear_rank" in candidates.columns:
         candidates["portfolio_sort_score"] = pd.to_numeric(candidates["linear_rank"], errors="coerce")
@@ -776,258 +788,366 @@ def financial_metric_cards(items: list[tuple[str, str, str]]) -> None:
     st.markdown("<div class='financial-card-grid'>" + "".join(cards) + "</div>", unsafe_allow_html=True)
 
 
-def show_percent_line_chart(df: pd.DataFrame, title: str, clip_abs: float = 2.0) -> None:
-    if df.empty:
-        st.info(f"No {title.lower()} ratios available.")
-        return
-    chart_df = df.dropna(how="all").copy()
-    if chart_df.empty:
-        st.info(f"No {title.lower()} ratios available.")
-        return
-    chart_df = chart_df.reset_index().rename(columns={chart_df.index.name or "index": "Year"})
-    melted = chart_df.melt("Year", var_name="Ratio", value_name="Value").dropna()
-    if melted.empty:
-        st.info(f"No {title.lower()} ratios available.")
-        return
-    melted["Display value"] = melted["Value"].clip(lower=-clip_abs, upper=clip_abs)
-    chart = (
-        alt.Chart(melted)
-        .mark_line(point=True)
-        .encode(
-            x=alt.X("Year:N", title=None),
-            y=alt.Y("Display value:Q", title=None, axis=alt.Axis(format=".0%")),
-            color=alt.Color("Ratio:N", title="Ratio"),
-            tooltip=[
-                alt.Tooltip("Year:N", title=""),
-                alt.Tooltip("Ratio:N", title="Ratio"),
-                alt.Tooltip("Value:Q", title="Value", format=".1%"),
-                alt.Tooltip("Display value:Q", title="Displayed", format=".1%"),
-            ],
-        )
-        .properties(height=320)
-    )
-    st.altair_chart(chart, width="stretch")
-
-
-def show_financial_statement_charts(selected_ticker: str) -> None:
-    st.markdown("#### Financial Statement Tear Sheet")
-    col_a, col_b = st.columns([0.25, 0.75])
-    with col_a:
-        refresh = st.checkbox("Refresh from Google Sheet", value=False)
-    with col_b:
-        load_clicked = st.button("Load statement charts", key=f"load_financials_{selected_ticker}")
-
-    cached = load_cached_financial_sheet(selected_ticker)
-    if cached.empty and not load_clicked:
-        st.caption("Load on demand to avoid refreshing SheetsFinance for every stock selection.")
-        return
-
-    try:
-        if load_clicked or not cached.empty:
-            with st.spinner(f"Loading statements for {selected_ticker}..."):
-                financials, source = get_financial_sheet_data(selected_ticker, refresh=refresh or cached.empty)
-    except RuntimeError as exc:
-        st.error(str(exc))
-        return
-
-    st.caption(f"Statement data source: {source}")
-    revenue = financial_series(financials, ["Revenue", "Gross Profit", "Operating Income", "Net Income"], "Income Statement")
-    margins = financial_series(financials, ["Gross profitability", "Operating profit margin", "ROIC"], "Derived")
-    cash_flow = financial_series(financials, ["Operating Cash Flow", "Capital Expenditure", "Free Cash Flow", "Net Income"], "Cash Flow")
-    balance = financial_series(financials, ["Total Assets", "Total Debt", "Total Equity", "Cash And Cash Equivalents", "Total Current Assets", "Total Current Liabilities"], "Balance Sheet")
-    valuation = financial_series(financials, ["Price to book ratio", "Current ratio", "FreeCashFlowYield"], "Derived")
-
-    gross_margin = financial_ratio(revenue, "Gross Profit", revenue, "Revenue")
-    net_margin = financial_ratio(revenue, "Net Income", revenue, "Revenue")
-    fcf_margin = financial_ratio(cash_flow, "Free Cash Flow", revenue, "Revenue")
-    fcf_to_net_income = financial_ratio(cash_flow, "Free Cash Flow", revenue, "Net Income")
-    capex_to_revenue = financial_ratio(cash_flow, "Capital Expenditure", revenue, "Revenue").abs()
-    debt_to_assets = financial_ratio(balance, "Total Debt", balance, "Total Assets")
-    cash_to_assets = financial_ratio(balance, "Cash And Cash Equivalents", balance, "Total Assets")
-    revenue_growth = pd.to_numeric(revenue["Revenue"], errors="coerce").pct_change() if "Revenue" in revenue.columns else pd.Series(dtype="float64")
-    gross_profit_growth = pd.to_numeric(revenue["Gross Profit"], errors="coerce").pct_change() if "Gross Profit" in revenue.columns else pd.Series(dtype="float64")
-    operating_income_growth = pd.to_numeric(revenue["Operating Income"], errors="coerce").pct_change() if "Operating Income" in revenue.columns else pd.Series(dtype="float64")
-    fcf_growth = pd.to_numeric(cash_flow["Free Cash Flow"], errors="coerce").pct_change() if "Free Cash Flow" in cash_flow.columns else pd.Series(dtype="float64")
-    percentage_ratios = pd.DataFrame(
-        {
-            "Gross margin": gross_margin,
-            "Operating margin": margins["Operating profit margin"] if "Operating profit margin" in margins.columns else pd.Series(dtype="float64"),
-            "Net margin": net_margin,
-            "ROIC": margins["ROIC"] if "ROIC" in margins.columns else pd.Series(dtype="float64"),
-            "Gross profitability": margins["Gross profitability"] if "Gross profitability" in margins.columns else pd.Series(dtype="float64"),
-            "FCF margin": fcf_margin,
-            "FCF yield": valuation["FreeCashFlowYield"] if "FreeCashFlowYield" in valuation.columns else pd.Series(dtype="float64"),
-            "FCF / net income": fcf_to_net_income,
-            "Capex / revenue": capex_to_revenue,
-            "Revenue growth": revenue_growth,
-            "Debt / assets": debt_to_assets,
-            "Cash / assets": cash_to_assets,
-            "Gross profit growth": gross_profit_growth,
-            "Operating income growth": operating_income_growth,
-            "FCF growth": fcf_growth,
-        }
-    ).dropna(how="all")
-
-    st.markdown("##### Percentage Ratios")
-    if percentage_ratios.empty:
-        st.info("No percentage ratio rows available.")
-    else:
-        ratio_left, ratio_right = st.columns(2)
-        with ratio_left:
-            profitability_cols = [
-                c for c in ["Gross margin", "Operating margin", "Net margin", "ROIC", "Gross profitability"] if c in percentage_ratios.columns
-            ]
-            st.markdown("###### Profitability")
-            show_percent_line_chart(percentage_ratios[profitability_cols], "profitability", clip_abs=1.5)
-        with ratio_right:
-            cash_cols = [c for c in ["FCF margin", "FCF yield", "FCF / net income", "Capex / revenue"] if c in percentage_ratios.columns]
-            st.markdown("###### Cash Generation")
-            show_percent_line_chart(percentage_ratios[cash_cols], "cash generation", clip_abs=1.5)
-
-        ratio_left, ratio_right = st.columns(2)
-        with ratio_left:
-            reinvestment_cols = [c for c in ["Capex / revenue", "Debt / assets", "Cash / assets"] if c in percentage_ratios.columns]
-            st.markdown("###### Reinvestment and Leverage")
-            show_percent_line_chart(percentage_ratios[reinvestment_cols], "reinvestment and leverage", clip_abs=1.0)
-        with ratio_right:
-            growth_cols = [c for c in ["Revenue growth", "Gross profit growth", "Operating income growth", "FCF growth"] if c in percentage_ratios.columns]
-            st.markdown("###### Growth and Cash Expansion")
-            show_percent_line_chart(percentage_ratios[growth_cols], "growth and cash expansion", clip_abs=2.0)
-
-
-
-
-def describe_comp_score(score: float | None) -> str:
-    if score is None:
-        return "No peer score available."
-    if score >= 0.85:
-        return "Top industry peer percentile."
-    if score >= 0.65:
-        return "Better than most industry peers."
-    if score >= 0.35:
-        return "Around the middle of industry peers."
-    if score >= 0.15:
-        return "Worse than most industry peers."
-    return "Bottom industry peer percentile."
-
-
-def valuation_comp_rows(row: pd.Series) -> pd.DataFrame:
-    pairs = [
-        ("P/E", "price_to_earnings", "comps_price_earnings"),
-        ("EV/EBITDA", "ev_to_ebitda", "comps_ev_ebitda"),
-    ]
-    rows = []
-    for label, stock_col, comp_col in pairs:
-        stock_multiple = numeric_value(row.get(stock_col))
-        comp_signal = numeric_value(row.get(comp_col))
-        rows.append(
-            {
-                "multiple": label,
-                "stock_multiple": stock_multiple,
-                "industry_peer_score": comp_signal,
-                "description": describe_comp_score(comp_signal),
-            }
-        )
-    return pd.DataFrame(rows)
-
-
 def show_portfolio_suggestion(stock_universe: pd.DataFrame) -> None:
-    if stock_universe.empty:
-        st.info("No stock universe available.")
+    if stock_universe.empty or "ticker" not in stock_universe.columns:
+        st.info("No stock universe available for AI portfolio suggestions.")
         return
 
-    controls = st.columns(2)
-    with controls[0]:
+    st.markdown("#### AI Portfolio Suggestions")
+    st.caption("Build an optimized portfolio based on model rankings and filters. All stocks will be equally weighted.")
+
+    # Portfolio configuration
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        portfolio_size = st.slider("Portfolio size", 5, 50, 20, help="Number of stocks to include")
+    with col2:
         sort_mode = st.selectbox(
             "Sort by",
-            ["XGB rank", "Linear rank", "Combined rank", "DCF gap", "Momentum", "Google Trends"],
+            ["XGBoost rank", "Linear rank", "Combined rank", "DCF gap", "Momentum", "Google Trends"],
+            help="How to rank and select stocks"
         )
-    with controls[1]:
-        portfolio_size = st.slider("Number of stocks", 10, 80, 40, step=5)
+    with col3:
+        min_data_completeness = st.slider("Min data completeness (%)", 0, 100, 50, help="Minimum data completeness score")
 
+    # Filters
+    st.markdown("##### Filters")
+    filter_cols = st.columns(4)
+    
+    filters = {}
+    
+    # Valuation filters
+    with filter_cols[0]:
+        st.markdown("**Valuation**")
+        dcf_min = st.number_input("DCF gap min", value=None, format="%.2f", help="Minimum DCF valuation gap")
+        dcf_max = st.number_input("DCF gap max", value=None, format="%.2f", help="Maximum DCF valuation gap")
+        if dcf_min is not None or dcf_max is not None:
+            filters["valuation_gap"] = (dcf_min, dcf_max)
+    
+    # Momentum filters
+    with filter_cols[1]:
+        st.markdown("**Momentum**")
+        momentum_col = "3_mth_momentum" if "3_mth_momentum" in stock_universe.columns else "3_month"
+        momentum_min = st.number_input(f"{momentum_col} min", value=None, format="%.2f")
+        momentum_max = st.number_input(f"{momentum_col} max", value=None, format="%.2f")
+        if momentum_min is not None or momentum_max is not None:
+            filters[momentum_col] = (momentum_min, momentum_max)
+    
+    # ROIC filters
+    with filter_cols[2]:
+        st.markdown("**Quality**")
+        roic_min = st.number_input("ROIC min", value=None, format="%.2f")
+        roic_max = st.number_input("ROIC max", value=None, format="%.2f")
+        if roic_min is not None or roic_max is not None:
+            filters["roic"] = (roic_min, roic_max)
+    
+    # Volatility filters
+    with filter_cols[3]:
+        st.markdown("**Risk**")
+        vol_min = st.number_input("Volatility min", value=None, format="%.2f")
+        vol_max = st.number_input("Volatility max", value=None, format="%.2f")
+        if vol_min is not None or vol_max is not None:
+            filters["stock_volatility"] = (vol_min, vol_max)
+
+    # Add data completeness filter
+    filters["data_completeness"] = (min_data_completeness, None)
+
+    # Map sort mode to function parameter
+    sort_mode_map = {
+        "XGBoost rank": "xgb_rank",
+        "Linear rank": "Linear rank",
+        "Combined rank": "Combined rank", 
+        "DCF gap": "DCF gap",
+        "Momentum": "Momentum",
+        "Google Trends": "Google Trends"
+    }
+    func_sort_mode = sort_mode_map[sort_mode]
+
+    # Build portfolio
     portfolio = build_portfolio_suggestion(
         stock_universe,
         size=portfolio_size,
-        sort_mode=sort_mode,
+        sort_mode=func_sort_mode,
+        filters=filters
     )
+
     if portfolio.empty:
-        st.info("No stocks passed the current portfolio filters.")
+        st.warning("No stocks match the selected criteria. Try adjusting filters.")
         return
 
-    avg_pred = pd.to_numeric(portfolio.get("xgb_prediction_raw"), errors="coerce").mean()
-    avg_actual = pd.to_numeric(portfolio.get("returns_2025"), errors="coerce").mean() if "returns_2025" in portfolio.columns else None
-    stock_metric_cards(
-        [
-            ("Holdings", f"{len(portfolio):.0f}"),
-            ("Equal weight", format_pct(portfolio["suggested_weight"].iloc[0])),
-            ("Avg XGB predicted", format_pct(avg_pred)),
-            ("Avg actual return", format_pct(avg_actual)),
-        ]
-    )
+    # Calculate portfolio metrics
+    equal_weight = 1.0 / len(portfolio)
 
-    st.markdown("#### Suggested Holdings")
+    # Calculate averages
+    avg_xgb_pred = pd.to_numeric(portfolio.get("xgb_prediction_raw"), errors="coerce").mean()
+    avg_linear_pred = pd.to_numeric(portfolio.get("linear_prediction_raw"), errors="coerce").mean()
+    avg_actual = pd.to_numeric(portfolio.get("returns_2025"), errors="coerce").mean() if "returns_2025" in portfolio.columns else None
+    avg_roic = pd.to_numeric(portfolio.get("roic"), errors="coerce").mean()
+    avg_dcf_gap = pd.to_numeric(portfolio.get("valuation_gap"), errors="coerce").mean()
+
+    # Portfolio summary cards
+    st.markdown("#### Portfolio Summary")
+    stock_metric_cards([
+        ("Holdings", f"{len(portfolio)}"),
+        ("Equal weight per stock", format_pct(equal_weight)),
+        ("Avg XGB predicted return", format_pct(avg_xgb_pred)),
+        ("Avg Linear predicted return", format_pct(avg_linear_pred)),
+        ("Avg actual return", format_pct(avg_actual)),
+        ("Avg ROIC", f"{avg_roic:.1%}" if pd.notna(avg_roic) else "-"),
+        ("Avg DCF gap", f"{avg_dcf_gap:.2f}" if pd.notna(avg_dcf_gap) else "-"),
+    ])
+
+    # Portfolio holdings table
+    st.markdown("#### Portfolio Holdings")
     display_cols = [
-        "suggested_weight",
-        "portfolio_sort_score",
-        "xgb_rank",
-        "linear_rank",
         "ticker",
         "name",
         "country",
         "sector",
         "industry",
+        "xgb_rank",
         "xgb_prediction_raw",
+        "linear_rank",
         "linear_prediction_raw",
         "returns_2025",
-        "data_completeness",
         "roic",
         "valuation_gap",
-        "momentum_2024",
         "3_mth_momentum",
         "google_trends",
+        "price_to_book",
+        "price_to_earnings",
+        "ev_to_ebitda",
+        "data_completeness",
     ]
-    visible = [col for col in display_cols if col in portfolio.columns]
+
+    visible_cols = [col for col in display_cols if col in portfolio.columns]
+
+    # Add equal weight column
+    portfolio_display = portfolio[visible_cols].copy()
+    portfolio_display["portfolio_weight"] = equal_weight
+
     st.dataframe(
-        portfolio[visible],
+        portfolio_display,
         width="stretch",
         hide_index=True,
         column_config={
-            "suggested_weight": st.column_config.NumberColumn("Weight", format="%.1%"),
-            "portfolio_sort_score": st.column_config.NumberColumn("Sort score", format="%.3f"),
+            "portfolio_weight": st.column_config.NumberColumn("Weight", format="%.1%"),
             "xgb_rank": st.column_config.NumberColumn("XGB rank", format="%.0f"),
-            "linear_rank": st.column_config.NumberColumn("Linear rank", format="%.0f"),
             "xgb_prediction_raw": st.column_config.NumberColumn("XGB predicted", format="%.1%"),
+            "linear_rank": st.column_config.NumberColumn("Linear rank", format="%.0f"),
             "linear_prediction_raw": st.column_config.NumberColumn("Linear predicted", format="%.1%"),
             "returns_2025": st.column_config.NumberColumn("Actual return", format="%.1%"),
-            "data_completeness": st.column_config.NumberColumn("Data completeness", format="%.0f"),
             "roic": st.column_config.NumberColumn("ROIC", format="%.3f"),
             "valuation_gap": st.column_config.NumberColumn("DCF gap", format="%.3f"),
-            "momentum_2024": st.column_config.NumberColumn("Momentum 2024", format="%.3f"),
             "3_mth_momentum": st.column_config.NumberColumn("3M momentum", format="%.3f"),
             "google_trends": st.column_config.NumberColumn("Google Trends", format="%.3f"),
+            "price_to_book": st.column_config.NumberColumn("P/B", format="%.2f"),
+            "price_to_earnings": st.column_config.NumberColumn("P/E", format="%.2f"),
+            "ev_to_ebitda": st.column_config.NumberColumn("EV/EBITDA", format="%.2f"),
+            "data_completeness": st.column_config.NumberColumn("Data completeness", format="%.0f"),
         },
     )
-    st.caption("Rule-based dashboard suggestion from the model-ranked universe, not portfolio advice.")
+
+    # Portfolio analysis
+    st.markdown("#### Portfolio Analysis")
+
+    # Sector allocation
+    if "sector" in portfolio.columns:
+        sector_counts = portfolio["sector"].value_counts()
+        if not sector_counts.empty:
+            st.markdown("**Sector Allocation**")
+            sector_df = sector_counts.reset_index()
+            sector_df.columns = ["Sector", "Count"]
+            sector_df["Percentage"] = (sector_df["Count"] / len(portfolio) * 100).round(1)
+            st.dataframe(sector_df, width="stretch", hide_index=True)
+
+    # Country allocation
+    if "country" in portfolio.columns:
+        country_counts = portfolio["country"].value_counts()
+        if not country_counts.empty:
+            st.markdown("**Country Allocation**")
+            country_df = country_counts.reset_index()
+            country_df.columns = ["Country", "Count"]
+            country_df["Percentage"] = (country_df["Count"] / len(portfolio) * 100).round(1)
+            st.dataframe(country_df, width="stretch", hide_index=True)
+
+    st.caption("AI portfolio suggestions based on model predictions and filters. Not investment advice.")
+
+
+def show_custom_portfolio(stock_universe: pd.DataFrame) -> None:
+    if stock_universe.empty or "ticker" not in stock_universe.columns:
+        st.info("No stock universe available for custom portfolio.")
+        return
+
+    st.markdown("#### Create Your Custom Portfolio")
+    st.caption("Select stocks from the universe to build your own portfolio. All stocks will be equally weighted.")
+
+    # Get available stocks for selection
+    available_stocks = stock_universe[["ticker", "name"]].copy()
+    available_stocks["label"] = available_stocks["ticker"].fillna("").astype(str)
+    available_stocks.loc[available_stocks["name"].notna() & (available_stocks["name"].astype(str) != ""), "label"] = (
+        available_stocks["ticker"].astype(str) + " - " + available_stocks["name"].astype(str)
+    )
+    available_stocks = available_stocks.sort_values("ticker")
+
+    # Multiselect for stock selection
+    selected_labels = st.multiselect(
+        "Select stocks for your portfolio",
+        available_stocks["label"].tolist(),
+        key="custom_portfolio_selector",
+        help="Choose multiple stocks to include in your custom portfolio"
+    )
+
+    if not selected_labels:
+        st.info("Select at least one stock to create a portfolio.")
+        return
+
+    # Get selected tickers
+    selected_tickers = available_stocks.loc[available_stocks["label"].isin(selected_labels), "ticker"].tolist()
+
+    # Filter stock universe to selected stocks
+    portfolio = stock_universe[stock_universe["ticker"].isin(selected_tickers)].copy()
+
+    if portfolio.empty:
+        st.error("No valid stocks found in selection.")
+        return
+
+    # Calculate portfolio metrics
+    portfolio_size = len(portfolio)
+    equal_weight = 1.0 / portfolio_size if portfolio_size > 0 else 0
+
+    # Calculate averages
+    avg_xgb_pred = pd.to_numeric(portfolio.get("xgb_prediction_raw"), errors="coerce").mean()
+    avg_linear_pred = pd.to_numeric(portfolio.get("linear_prediction_raw"), errors="coerce").mean()
+    avg_actual = pd.to_numeric(portfolio.get("returns_2025"), errors="coerce").mean() if "returns_2025" in portfolio.columns else None
+    avg_roic = pd.to_numeric(portfolio.get("roic"), errors="coerce").mean()
+    avg_dcf_gap = pd.to_numeric(portfolio.get("valuation_gap"), errors="coerce").mean()
+
+    # Portfolio summary cards
+    st.markdown("#### Portfolio Summary")
+    stock_metric_cards([
+        ("Holdings", f"{portfolio_size}"),
+        ("Equal weight per stock", format_pct(equal_weight)),
+        ("Avg XGB predicted return", format_pct(avg_xgb_pred)),
+        ("Avg Linear predicted return", format_pct(avg_linear_pred)),
+        ("Avg actual return", format_pct(avg_actual)),
+        ("Avg ROIC", f"{avg_roic:.1%}" if pd.notna(avg_roic) else "-"),
+        ("Avg DCF gap", f"{avg_dcf_gap:.2f}" if pd.notna(avg_dcf_gap) else "-"),
+    ])
+
+    # Portfolio holdings table
+    st.markdown("#### Portfolio Holdings")
+    display_cols = [
+        "ticker",
+        "name",
+        "country",
+        "sector",
+        "industry",
+        "xgb_rank",
+        "xgb_prediction_raw",
+        "linear_rank",
+        "linear_prediction_raw",
+        "returns_2025",
+        "roic",
+        "valuation_gap",
+        "3_mth_momentum",
+        "google_trends",
+        "price_to_book",
+        "price_to_earnings",
+        "ev_to_ebitda",
+        "data_completeness",
+    ]
+
+    visible_cols = [col for col in display_cols if col in portfolio.columns]
+
+    # Add equal weight column
+    portfolio_display = portfolio[visible_cols].copy()
+    portfolio_display["portfolio_weight"] = equal_weight
+
+    st.dataframe(
+        portfolio_display,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "portfolio_weight": st.column_config.NumberColumn("Weight", format="%.1%"),
+            "xgb_rank": st.column_config.NumberColumn("XGB rank", format="%.0f"),
+            "xgb_prediction_raw": st.column_config.NumberColumn("XGB predicted", format="%.1%"),
+            "linear_rank": st.column_config.NumberColumn("Linear rank", format="%.0f"),
+            "linear_prediction_raw": st.column_config.NumberColumn("Linear predicted", format="%.1%"),
+            "returns_2025": st.column_config.NumberColumn("Actual return", format="%.1%"),
+            "roic": st.column_config.NumberColumn("ROIC", format="%.3f"),
+            "valuation_gap": st.column_config.NumberColumn("DCF gap", format="%.3f"),
+            "3_mth_momentum": st.column_config.NumberColumn("3M momentum", format="%.3f"),
+            "google_trends": st.column_config.NumberColumn("Google Trends", format="%.3f"),
+            "price_to_book": st.column_config.NumberColumn("P/B", format="%.2f"),
+            "price_to_earnings": st.column_config.NumberColumn("P/E", format="%.2f"),
+            "ev_to_ebitda": st.column_config.NumberColumn("EV/EBITDA", format="%.2f"),
+            "data_completeness": st.column_config.NumberColumn("Data completeness", format="%.0f"),
+        },
+    )
+
+    # Portfolio analysis
+    st.markdown("#### Portfolio Analysis")
+
+    # Sector allocation
+    if "sector" in portfolio.columns:
+        sector_counts = portfolio["sector"].value_counts()
+        if not sector_counts.empty:
+            st.markdown("**Sector Allocation**")
+            sector_df = sector_counts.reset_index()
+            sector_df.columns = ["Sector", "Count"]
+            sector_df["Percentage"] = (sector_df["Count"] / len(portfolio) * 100).round(1)
+            st.dataframe(sector_df, width="stretch", hide_index=True)
+
+    # Country allocation
+    if "country" in portfolio.columns:
+        country_counts = portfolio["country"].value_counts()
+        if not country_counts.empty:
+            st.markdown("**Country Allocation**")
+            country_df = country_counts.reset_index()
+            country_df.columns = ["Country", "Count"]
+            country_df["Percentage"] = (country_df["Count"] / len(portfolio) * 100).round(1)
+            st.dataframe(country_df, width="stretch", hide_index=True)
+
+    st.caption("Custom portfolio analysis. Not investment advice.")
 
 
 def stock_selector(stock_universe: pd.DataFrame, filtered_xgb: pd.DataFrame, key: str) -> str | None:
-    if stock_universe.empty or "ticker" not in stock_universe.columns:
+    """Select a stock from the filtered universe for detailed analysis."""
+    if stock_universe.empty or filtered_xgb.empty or "ticker" not in stock_universe.columns or "ticker" not in filtered_xgb.columns:
         return None
-
-    selector_df = stock_universe[["ticker", "name"]].copy()
-    selector_df["label"] = selector_df["ticker"].fillna("").astype(str)
-    selector_df.loc[selector_df["name"].notna() & (selector_df["name"].astype(str) != ""), "label"] = (
-        selector_df["ticker"].astype(str) + " - " + selector_df["name"].astype(str)
+    
+    # Filter stock universe to only include tickers in filtered predictions
+    available_tickers = filtered_xgb["ticker"].dropna().unique()
+    selector_data = stock_universe[stock_universe["ticker"].isin(available_tickers)].copy()
+    
+    if selector_data.empty:
+        return None
+    
+    # Create selector with ticker, name, and rank
+    selector = selector_data[["ticker", "name", "xgb_rank"]].copy()
+    selector["label"] = selector["ticker"].astype(str)
+    selector.loc[selector["name"].notna() & (selector["name"].astype(str) != ""), "label"] = (
+        selector["ticker"].astype(str) + " - " + selector["name"].astype(str)
     )
-    selector_df = selector_df.sort_values("ticker")
-    default_index = 0
-    if not filtered_xgb.empty and "ticker" in filtered_xgb.columns:
-        top_ticker = filtered_xgb.sort_values("prediction_rank", na_position="last").iloc[0]["ticker"]
-        matches = selector_df.index[selector_df["ticker"] == top_ticker].tolist()
-        if matches:
-            default_index = selector_df.index.get_loc(matches[0])
-    selected_label = st.selectbox("Stock", selector_df["label"].tolist(), index=default_index, key=key)
-    return selector_df.loc[selector_df["label"] == selected_label, "ticker"].iloc[0]
+    selector = selector.sort_values("xgb_rank", na_position="last")
+    
+    # Create selectbox
+    selected_label = st.selectbox(
+        "Select a stock for analysis",
+        [""] + selector["label"].tolist(),
+        key=key,
+        help="Choose a stock from the filtered predictions to view detailed analysis"
+    )
+    
+    if not selected_label:
+        return None
+    
+    # Get the ticker from the selected label
+    selected_row = selector[selector["label"] == selected_label]
+    if not selected_row.empty:
+        return selected_row["ticker"].iloc[0]
+    
+    return None
 
 
 def show_stock_profile(stock_universe: pd.DataFrame, selected_ticker: str, macro_text: str) -> None:
@@ -1236,7 +1356,7 @@ importance = read_csv(str(importance_path), file_cache_token(importance_path))
 coefficients = read_csv(str(coefficients_path), file_cache_token(coefficients_path))
 run_log = read_csv(str(run_log_path), file_cache_token(run_log_path))
 xgb_summary = read_text(str(xgb_summary_path), file_cache_token(xgb_summary_path))
-linear_summary = read_text(str(linear_summary_path), file_cache_token(linear_summary_path))
+linear_summary = read_text(str(linear_summary_path), file_cache_token(MACRO_VERDICT_PATH))
 macro_verdict = read_text(str(MACRO_VERDICT_PATH), file_cache_token(MACRO_VERDICT_PATH))
 feature_data = read_excel(str(feature_data_path), file_cache_token(feature_data_path))
 stock_universe = build_stock_universe(xgb, linear, feature_data)
@@ -1342,7 +1462,12 @@ with rankings_tab:
             )
 
 with portfolio_tab:
-    show_portfolio_suggestion(stock_universe)
+    portfolio_mode = st.radio("Portfolio Mode", ["AI Suggestions", "Custom Portfolio"], horizontal=True)
+    
+    if portfolio_mode == "AI Suggestions":
+        show_portfolio_suggestion(stock_universe)
+    else:
+        show_custom_portfolio(stock_universe)
 
 with model_tab:
     left, right = st.columns(2)
