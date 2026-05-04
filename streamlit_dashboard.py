@@ -788,6 +788,142 @@ def financial_metric_cards(items: list[tuple[str, str, str]]) -> None:
     st.markdown("<div class='financial-card-grid'>" + "".join(cards) + "</div>", unsafe_allow_html=True)
 
 
+def show_percent_line_chart(df: pd.DataFrame, title: str, clip_abs: float = 2.0) -> None:
+    if df.empty:
+        st.info(f"No {title.lower()} ratios available.")
+        return
+    chart_df = df.dropna(how="all").copy()
+    if chart_df.empty:
+        st.info(f"No {title.lower()} ratios available.")
+        return
+    chart_df = chart_df.reset_index().rename(columns={chart_df.index.name or "index": "Year"})
+    melted = chart_df.melt("Year", var_name="Ratio", value_name="Value").dropna()
+    if melted.empty:
+        st.info(f"No {title.lower()} ratios available.")
+        return
+    melted["Display value"] = melted["Value"].clip(lower=-clip_abs, upper=clip_abs)
+    chart = (
+        alt.Chart(melted)
+        .mark_line(point=True)
+        .encode(
+            x=alt.X("Year:N", title=None),
+            y=alt.Y("Display value:Q", title=None, axis=alt.Axis(format=".0%")),
+            color=alt.Color("Ratio:N", title="Ratio"),
+            tooltip=[
+                alt.Tooltip("Year:N", title=""),
+                alt.Tooltip("Ratio:N", title="Ratio"),
+                alt.Tooltip("Value:Q", title="Value", format=".1%"),
+                alt.Tooltip("Display value:Q", title="Displayed", format=".1%"),
+            ],
+        )
+        .properties(height=320)
+    )
+    st.altair_chart(chart, width="stretch")
+
+
+def show_financial_statement_charts(selected_ticker: str) -> None:
+    st.markdown("#### Financial Statement Tear Sheet")
+    col_a, col_b = st.columns([0.25, 0.75])
+    with col_a:
+        refresh = st.checkbox("Refresh from Google Sheet", value=False)
+    with col_b:
+        load_clicked = st.button("Load statement charts", key=f"load_financials_{selected_ticker}")
+
+    cached = load_cached_financial_sheet(selected_ticker)
+    if cached.empty and not load_clicked:
+        st.caption("Load on demand to avoid refreshing SheetsFinance for every stock selection.")
+        return
+
+    try:
+        if load_clicked or not cached.empty:
+            with st.spinner(f"Loading statements for {selected_ticker}..."):
+                financials, source = get_financial_sheet_data(selected_ticker, refresh=refresh or cached.empty)
+    except RuntimeError as exc:
+        st.error(str(exc))
+        return
+
+    st.caption(f"Statement data source: {source}")
+    revenue = financial_series(financials, ["Revenue", "Gross Profit", "Operating Income", "Net Income"], "Income Statement")
+    margins = financial_series(financials, ["Gross profitability", "Operating profit margin", "ROIC"], "Derived")
+    cash_flow = financial_series(financials, ["Operating Cash Flow", "Capital Expenditure", "Free Cash Flow", "Net Income"], "Cash Flow")
+    balance = financial_series(
+        financials,
+        [
+            "Total Assets",
+            "Total Debt",
+            "Total Equity",
+            "Cash And Cash Equivalents",
+            "Total Current Assets",
+            "Total Current Liabilities",
+        ],
+        "Balance Sheet",
+    )
+    valuation = financial_series(financials, ["Price to book ratio", "Current ratio", "FreeCashFlowYield"], "Derived")
+
+    gross_margin = financial_ratio(revenue, "Gross Profit", revenue, "Revenue")
+    net_margin = financial_ratio(revenue, "Net Income", revenue, "Revenue")
+    fcf_margin = financial_ratio(cash_flow, "Free Cash Flow", revenue, "Revenue")
+    fcf_to_net_income = financial_ratio(cash_flow, "Free Cash Flow", revenue, "Net Income")
+    capex_to_revenue = financial_ratio(cash_flow, "Capital Expenditure", revenue, "Revenue").abs()
+    debt_to_assets = financial_ratio(balance, "Total Debt", balance, "Total Assets")
+    cash_to_assets = financial_ratio(balance, "Cash And Cash Equivalents", balance, "Total Assets")
+    revenue_growth = pd.to_numeric(revenue["Revenue"], errors="coerce").pct_change() if "Revenue" in revenue.columns else pd.Series(dtype="float64")
+    gross_profit_growth = (
+        pd.to_numeric(revenue["Gross Profit"], errors="coerce").pct_change() if "Gross Profit" in revenue.columns else pd.Series(dtype="float64")
+    )
+    operating_income_growth = (
+        pd.to_numeric(revenue["Operating Income"], errors="coerce").pct_change()
+        if "Operating Income" in revenue.columns
+        else pd.Series(dtype="float64")
+    )
+    fcf_growth = pd.to_numeric(cash_flow["Free Cash Flow"], errors="coerce").pct_change() if "Free Cash Flow" in cash_flow.columns else pd.Series(dtype="float64")
+    percentage_ratios = pd.DataFrame(
+        {
+            "Gross margin": gross_margin,
+            "Operating margin": margins["Operating profit margin"] if "Operating profit margin" in margins.columns else pd.Series(dtype="float64"),
+            "Net margin": net_margin,
+            "ROIC": margins["ROIC"] if "ROIC" in margins.columns else pd.Series(dtype="float64"),
+            "Gross profitability": margins["Gross profitability"] if "Gross profitability" in margins.columns else pd.Series(dtype="float64"),
+            "FCF margin": fcf_margin,
+            "FCF yield": valuation["FreeCashFlowYield"] if "FreeCashFlowYield" in valuation.columns else pd.Series(dtype="float64"),
+            "FCF / net income": fcf_to_net_income,
+            "Capex / revenue": capex_to_revenue,
+            "Revenue growth": revenue_growth,
+            "Debt / assets": debt_to_assets,
+            "Cash / assets": cash_to_assets,
+            "Gross profit growth": gross_profit_growth,
+            "Operating income growth": operating_income_growth,
+            "FCF growth": fcf_growth,
+        }
+    ).dropna(how="all")
+
+    st.markdown("##### Percentage Ratios")
+    if percentage_ratios.empty:
+        st.info("No percentage ratio rows available.")
+    else:
+        ratio_left, ratio_right = st.columns(2)
+        with ratio_left:
+            profitability_cols = [
+                c for c in ["Gross margin", "Operating margin", "Net margin", "ROIC", "Gross profitability"] if c in percentage_ratios.columns
+            ]
+            st.markdown("###### Profitability")
+            show_percent_line_chart(percentage_ratios[profitability_cols], "profitability", clip_abs=1.5)
+        with ratio_right:
+            cash_cols = [c for c in ["FCF margin", "FCF yield", "FCF / net income", "Capex / revenue"] if c in percentage_ratios.columns]
+            st.markdown("###### Cash Generation")
+            show_percent_line_chart(percentage_ratios[cash_cols], "cash generation", clip_abs=1.5)
+
+        ratio_left, ratio_right = st.columns(2)
+        with ratio_left:
+            reinvestment_cols = [c for c in ["Capex / revenue", "Debt / assets", "Cash / assets"] if c in percentage_ratios.columns]
+            st.markdown("###### Reinvestment and Leverage")
+            show_percent_line_chart(percentage_ratios[reinvestment_cols], "reinvestment and leverage", clip_abs=1.0)
+        with ratio_right:
+            growth_cols = [c for c in ["Revenue growth", "Gross profit growth", "Operating income growth", "FCF growth"] if c in percentage_ratios.columns]
+            st.markdown("###### Growth and Cash Expansion")
+            show_percent_line_chart(percentage_ratios[growth_cols], "growth and cash expansion", clip_abs=2.0)
+
+
 def show_portfolio_suggestion(stock_universe: pd.DataFrame) -> None:
     if stock_universe.empty or "ticker" not in stock_universe.columns:
         st.info("No stock universe available for AI portfolio suggestions.")
