@@ -5,6 +5,9 @@ from fredapi import Fred
 import yfinance as yf
 import smtplib
 import sys
+import html
+import re
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import datetime
@@ -37,6 +40,108 @@ print("✅ Email loaded:", not missing_email_vars)
 if missing_email_vars:
     print("⚠️ Missing email environment variables:", ", ".join(missing_email_vars))
 
+ISM_BASE_URL = "https://www.ismworld.org/supply-management-news-and-reports/reports/ism-pmi-reports"
+MONTH_SLUGS = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+]
+
+
+def recent_month_slugs(today, lookback_months=6):
+    year = today.year
+    month_index = today.month - 1
+    for offset in range(lookback_months):
+        index = month_index - offset
+        report_year = year + index // 12
+        slug = MONTH_SLUGS[index % 12]
+        label = f"{slug.title()} {report_year}"
+        yield slug, label
+
+
+def fetch_url_text(url, params=None):
+    response = requests.get(
+        url,
+        params=params,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
+            )
+        },
+        timeout=20,
+    )
+    response.raise_for_status()
+    return response.text
+
+
+def extract_ism_pmi(page_text, label):
+    text = html.unescape(re.sub(r"<[^>]+>", " ", page_text))
+    text = re.sub(r"\s+", " ", text)
+    pattern = rf"{re.escape(label)}\s*(?:®|\(R\))?\s*(?:at|registered)\s*([0-9]+(?:\.[0-9]+)?)\s*(?:percent|%)"
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+    return None
+
+
+def find_prnewswire_ism_release(month_label, indicator_label):
+    query = f"{month_label} ISM {indicator_label} Report"
+    page_text = fetch_url_text(
+        "https://www.prnewswire.com/search/news/",
+        params={"keyword": query},
+    )
+    slug_label = indicator_label.lower().replace(" ", "-")
+    links = re.findall(r'href="([^"]+)"', page_text, flags=re.IGNORECASE)
+    for link in links:
+        if slug_label not in link.lower() or "ism" not in link.lower():
+            continue
+        if link.startswith("/"):
+            return f"https://www.prnewswire.com{link}"
+        if link.startswith("https://www.prnewswire.com/"):
+            return link
+    return None
+
+
+def get_latest_ism_pmi(report_path, indicator_label):
+    today = datetime.datetime.today()
+    errors = []
+    for month_slug, month_label in recent_month_slugs(today):
+        candidate_urls = [f"{ISM_BASE_URL}/{report_path}/{month_slug}/"]
+        try:
+            prnewswire_url = find_prnewswire_ism_release(month_label, indicator_label)
+        except Exception as exc:
+            prnewswire_url = None
+            errors.append(f"{month_label}: PR Newswire search failed: {exc}")
+        if prnewswire_url:
+            candidate_urls.append(prnewswire_url)
+
+        for url in candidate_urls:
+            try:
+                page_text = fetch_url_text(url)
+            except Exception as exc:
+                errors.append(f"{month_label}: {exc}")
+                continue
+            value = extract_ism_pmi(page_text, indicator_label)
+            if value is not None:
+                print(f"ISM {indicator_label} loaded from {url}: {value:.1f} ({month_label})")
+                return value
+            errors.append(f"{month_label}: value not found at {url}")
+    raise RuntimeError(
+        f"Could not fetch ISM {indicator_label}. Tried recent ISM report pages. "
+        f"Last errors: {'; '.join(errors[-3:])}"
+    )
+
+
 # === FRED Setup ===
 fred = Fred(api_key="b300bb17176490feb3bdc9f571eb9712")
 try:
@@ -58,9 +163,13 @@ except Exception as e:
     print("⚠️ VIX fetch failed:", e)
     vix_price = 20.0
 
-# === Static or scraped PMI data ===
-ism_services = 50.80
-ism_manu = 49.50
+# === ISM PMI data ===
+try:
+    ism_services = get_latest_ism_pmi("services", "Services PMI")
+    ism_manu = get_latest_ism_pmi("pmi", "Manufacturing PMI")
+except Exception as e:
+    print("ISM data error:", e)
+    exit()
 
 # === Indicator scoring ===
 def get_tilt(name, val):

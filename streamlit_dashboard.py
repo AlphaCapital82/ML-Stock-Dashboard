@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import re
 import time
 from html import escape
 from pathlib import Path
@@ -479,11 +480,13 @@ def momentum_read(row: pd.Series, universe: pd.DataFrame) -> str:
 
 def macro_support_score(macro_text: str) -> tuple[float | None, str]:
     text = (macro_text or "").lower()
-    if "final market stance: bullish" in text or "macro verdict: bullish" in text:
-        return 100.0, "Bullish"
-    if "final market stance: bearish" in text or "macro verdict: bearish" in text:
-        return 0.0, "Bearish"
-    if "final market stance: neutral" in text or "macro verdict: neutral" in text:
+    verdict_match = re.search(r"(?:final market stance|macro verdict):\s*([a-z ]+)", text)
+    verdict = verdict_match.group(1).strip() if verdict_match else ""
+    if "bullish" in verdict:
+        return 100.0, verdict.title()
+    if "bearish" in verdict:
+        return 0.0, verdict.title()
+    if "neutral" in verdict:
         return 50.0, "Neutral"
     return None, "Missing"
 

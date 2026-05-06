@@ -1,5 +1,5 @@
-📅 2026-04-30
-📈 Macro Verdict: Bullish (Confidence: 66.7%)
+📅 2026-05-05
+📈 Macro Verdict: Strongly Bullish (Confidence: 88.9%)
 
 🔍 Indicator Summary:
 
@@ -7,11 +7,11 @@
 ✅ Unemployment Rate: Bullish (4.30)
 ✅ Fed Funds Rate: Bullish (3.64)
 ✅ Yield Curve (10Y–2Y): Bullish (0.50)
-✅ VIX: Bullish (17.61)
-✅ ISM Services PMI: Bullish (50.80)
-❌ ISM Manufacturing PMI: Bearish (49.50)
+✅ VIX: Bullish (17.53)
+✅ ISM Services PMI: Bullish (53.60)
+✅ ISM Manufacturing PMI: Bullish (52.70)
 ✅ LEI: Bullish (1.72)
 ✅ NFCI: Bullish (-0.52)
 
-➡️ Total Bullish Tilt: 6 (out of 9)
-➡️ Final Market Stance: Bullish
+➡️ Total Bullish Tilt: 8 (out of 9)
+➡️ Final Market Stance: Strongly Bullish

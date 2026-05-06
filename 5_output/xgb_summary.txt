@@ -1,37 +1,35 @@
 XGBOOST MODEL SUMMARY
-Generated UTC: 2026-05-03T21:37:14+00:00
+Generated UTC: 2026-05-06T17:36:44+00:00
 Input file: 4_ready_for_analysis\tickerlist.xlsx
-Rows scored: 1812
+Rows scored: 1858
 Rows with target used for modeling: 1812
 Target column: returns_2025_ihs
 Raw target column: returns_2025
 Feature count: 19
 
 Metrics:
-- train_rmse: 0.288285
-- val_rmse: 0.317272
-- test_rmse: 0.360911
-- train_r2: 0.433268
-- val_r2: 0.179762
-- test_r2: 0.161946
+- train_rmse: 0.297591
+- val_rmse: 0.320323
+- test_rmse: 0.362942
+- train_r2: 0.396089
+- val_r2: 0.163911
+- test_r2: 0.152488
 
 Best parameters:
 {
   "colsample_bytree": 0.6,
-  "gamma": 0,
+  "gamma": 0.05,
   "learning_rate": 0.02,
-  "max_depth": 4,
-  "min_child_weight": 5,
+  "max_depth": 3,
+  "min_child_weight": 8,
   "n_estimators": 300,
-  "reg_alpha": 0.001,
-  "reg_lambda": 2,
-  "subsample": 0.85
+  "reg_alpha": 0.01,
+  "reg_lambda": 5,
+  "subsample": 0.75
 }
 
 Tuning suggestions:
-- Possible overfitting: decrease max_depth and/or increase min_child_weight.
-- Try stronger regularization: increase reg_alpha and reg_lambda.
-- Lower learning_rate slightly and keep early stopping.
+- Model balance looks reasonable; tune around current best parameters.
 - Validation and test differ a lot; consider more robust split or repeated runs with different seeds.
 
 Output files:
